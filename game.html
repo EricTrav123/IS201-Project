@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #87CEEB; /* Sky blue background */
+            margin: 0;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden; /* Prevent scrollbars */
+            flex-direction: column; /* Stack canvas and message box */
+            position: relative; /* Needed for absolute positioning of children */
+        }
+
+        canvas {
+            border: 5px solid #333;
+            display: block;
+            background-color: #87CEEB; /* Match body background */
+            max-width: 90%; /* Responsive width */
+            max-height: 80vh; /* Responsive height */
+            aspect-ratio: 4 / 3; /* Maintain aspect ratio */
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            border-radius: 10px; /* Rounded corners for the canvas */
+            z-index: 1; /* Canvas behind messages/buttons */
+        }
+
+        /* Common styles for overlay buttons */
+        .overlay-button {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1em; /* Adjusted size */
+            padding: 15px 25px; /* Bigger padding */
+            cursor: pointer;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 5px #999; /* Slightly bigger shadow */
+            transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s;
+            position: absolute; /* Position over the canvas */
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10; /* Ensure buttons are on top */
+            text-shadow: 1px 1px 2px #000;
+        }
+
+        .overlay-button:active {
+            box-shadow: 0 2px #666;
+            transform: translate(-50%, -48%); /* Adjust transform for pressed effect */
+        }
+
+        /* Start Button Specific Styles */
+        #startButton {
+            background-color: #FFA500; /* Orange button */
+            display: block; /* Initially visible */
+        }
+         #startButton:active {
+             background-color: #cc8400; /* Darker orange */
+         }
+
+
+        /* Game Over Box */
+        #messageBox {
+            display: none; /* Hidden by default */
+            position: absolute; /* Position over the canvas */
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 30px;
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            border: 3px solid #fff;
+            border-radius: 15px;
+            text-align: center;
+            font-size: 1.5em; /* Larger text */
+            z-index: 10;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            flex-direction: column; /* Stack text and button */
+            align-items: center; /* Center items horizontally */
+        }
+
+        /* Restart Button Specific Styles (inside messageBox) */
+        #restartButton {
+             /* Inherits font from body, but can override */
+            font-size: 0.8em; /* Keep original size or adjust */
+            padding: 10px 20px;
+            margin-top: 20px;
+            cursor: pointer;
+            background-color: #4CAF50; /* Green button */
+            color: white;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 4px #999;
+            transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s;
+            /* No absolute positioning needed, it's inside the flexbox */
+        }
+
+         #restartButton:active {
+            background-color: #367c39;
+            box-shadow: 0 2px #666;
+            transform: translateY(2px); /* Simple pressed effect */
+        }
+
+        #scoreDisplay {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 2em;
+            color: #fff;
+            text-shadow: 2px 2px 4px #000;
+            z-index: 5; /* Above canvas, below buttons/messages */
+            display: none; /* Hide score initially */
+        }
+
+    </style>
+</head>
+<body>
+    
+    <div id="scoreDisplay">Score: 0</div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <button id="startButton" class="overlay-button">Start Game</button>
+
+    <div id="messageBox">
+        <a href="https://startup.libbuddies.click"> Resume</a> 
+        <p id="gameOverText">Game Over!</p>
+        <p id="finalScoreText">Your Score: 0</p>
+        <button id="restartButton">Restart</button>
+    </div>
+
+    <script>
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageBox = document.getElementById('messageBox');
+        const restartButton = document.getElementById('restartButton');
+        const startButton = document.getElementById('startButton');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const finalScoreText = document.getElementById('finalScoreText');
+
+        let canvasWidth, canvasHeight;
+
+        // --- Game Variables ---
+        let bird, pipes, score, gravity, lift, gameSpeed, gameStarted, gameOver;
+        let gameLoopId = null; // To store the animation frame request ID
+        let frameCount = 0; // To control pipe spawning
+
+        // --- Game Constants ---
+        const birdProps = {
+            x: 50,
+            y: 150, // Initial Y will be reset in initGame
+            width: 30,
+            height: 30,
+            color: '#FFD700', // Yellow bird
+            velocity: 0
+        };
+
+        const pipeProps = {
+            width: 60, // Pipe width
+            gap: 150,  // Gap between pipes
+            color: 'green', // Green pipes
+            spawnRate:90, // How often pipes spawn (in frames, lower is faster)
+            speed: 3
+        };
+
+        // --- Game Physics/Control ---
+        // *** Adjusted gravity: Lower value means weaker gravity (slower fall) ***
+        gravity = .3; // Constant downward pull (was 0.4)
+        lift = -8;     // Constant upward force on flap (negative is up)
+
+        // --- Initialization ---
+        function initGame() {
+            // Stop any existing game loop
+            if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId);
+                gameLoopId = null;
+            }
+
+            // Reset bird properties
+            bird = { ...birdProps };
+            // Ensure canvasHeight is valid before setting bird.y
+             if (canvasHeight) {
+                 bird.y = canvasHeight / 2 - bird.height / 2; // Center bird vertically
+             } else {
+                 bird.y = 150; // Default fallback
+             }
+            bird.velocity = 0;
+
+            // Reset other game state variables
+            pipes = [];
+            score = 0;
+            gameSpeed = pipeProps.speed; // Reset game speed
+            gameStarted = false;
+            gameOver = false;
+            frameCount = 0;
+
+            // Reset UI elements
+            messageBox.style.display = 'none'; // Hide game over box
+            startButton.style.display = 'block'; // Show start button
+            scoreDisplay.style.display = 'none'; // Hide score display
+            scoreDisplay.textContent = `Score: 0`; // Reset score text
+
+            // Draw the initial static scene (bird, ground)
+            drawInitialState();
+        }
+
+        // --- Drawing Functions ---
+         function drawInitialState() {
+            // Clear canvas
+            if (!ctx || !canvasWidth || !canvasHeight) return; // Ensure context and dimensions are valid
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // Draw Ground
+            ctx.fillStyle = '#D2B48C'; // Tan color for ground
+            ctx.fillRect(0, canvasHeight - 20, canvasWidth, 20);
+
+             // Draw initial bird position (only if bird object exists)
+            if (bird) {
+                ctx.fillStyle = bird.color;
+                ctx.beginPath();
+                ctx.arc(bird.x + bird.width / 2, bird.y + bird.height / 2, bird.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#A0522D'; // Brown outline
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Simple eye
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(bird.x + bird.width * 0.7, bird.y + bird.height * 0.4, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+         }
+
+        function drawGameElements() {
+             // Clear canvas
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            // Draw Ground
+             ctx.fillStyle = '#D2B48C';
+            ctx.fillRect(0, canvasHeight - 20, canvasWidth, 20);
+
+            // Draw Pipes
+            ctx.fillStyle = pipeProps.color;
+            ctx.strokeStyle = '#006400'; // Darker green outline
+            ctx.lineWidth = 3;
+            pipes.forEach(pipe => {
+                ctx.fillRect(pipe.x, pipe.y, pipeProps.width, pipe.height);
+                ctx.strokeRect(pipe.x, pipe.y, pipeProps.width, pipe.height);
+
+                // Add pipe caps for visual flair
+                const capHeight = 15;
+                 if (pipe.y === 0) { // Top pipe cap
+                    ctx.fillRect(pipe.x - 5, pipe.height - capHeight, pipeProps.width + 10, capHeight);
+                     ctx.strokeRect(pipe.x - 5, pipe.height - capHeight, pipeProps.width + 10, capHeight);
+                 } else { // Bottom pipe cap (attached to bottom pipe's top)
+                    ctx.fillRect(pipe.x - 5, pipe.y, pipeProps.width + 10, capHeight);
+                     ctx.strokeRect(pipe.x - 5, pipe.y, pipeProps.width + 10, capHeight);
+                 }
+            });
+
+            // Draw Bird
+            if (bird) { // Make sure bird exists
+                ctx.fillStyle = bird.color;
+                ctx.beginPath();
+                // Simple rotation effect based on velocity for visual feedback
+                const angle = bird.velocity * 0.05; // Adjust multiplier for more/less rotation
+                ctx.save(); // Save current context state
+                ctx.translate(bird.x + bird.width / 2, bird.y + bird.height / 2); // Move origin to bird center
+                ctx.rotate(angle); // Rotate context
+                // Draw bird centered at the new origin (0,0)
+                ctx.arc(0, 0, bird.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#A0522D';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Draw eye relative to bird center
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(bird.width * 0.2, -bird.height * 0.1, 3, 0, Math.PI * 2); // Adjusted eye position for rotation
+                ctx.fill();
+                ctx.restore(); // Restore context state
+            }
+        }
+
+
+        // --- Game Logic ---
+        function startGame() {
+            // Only start if not already started and not game over
+            if (!gameStarted && !gameOver) {
+                gameStarted = true;
+                gameOver = false;
+                startButton.style.display = 'none';
+                scoreDisplay.style.display = 'block';
+                frameCount = 0; // Reset frame count for pipe spawning
+                pipes = []; // Clear pipes
+                bird.velocity = 0; // Ensure bird starts stationary
+
+                // Start the main game loop
+                if (gameLoopId) cancelAnimationFrame(gameLoopId);
+                gameLoop();
+            }
+        }
+
+        // --- Player Control ---
+        function flap() {
+            // Apply upward velocity (lift) if game is running
+            if (gameStarted && !gameOver) {
+                bird.velocity = lift; // Negative value makes the bird go up
+            }
+        }
+
+        // --- Game Update (Physics, Spawning, Collision) ---
+        function update() {
+            if (gameOver) return; // Stop updates if game over
+
+            // Bird physics: Apply gravity, update position
+            bird.velocity += gravity; // Gravity is now weaker (0.2)
+            bird.y += bird.velocity;
+
+            // Collision Detection: Ground
+            if (bird.y + bird.height > canvasHeight - 20) {
+                 bird.y = canvasHeight - 20 - bird.height; // Stop at ground
+                 bird.velocity = 0;
+                 endGame();
+                 return; // Stop update processing
+            }
+            // Collision Detection: Ceiling
+             if (bird.y < 0) {
+                 bird.y = 0; // Stop at ceiling
+                 bird.velocity = 0; // Optionally stop upward momentum
+                 endGame();
+                 return; // Stop update processing
+             }
+
+            // Pipe Spawning Logic
+            frameCount++;
+            if (frameCount % pipeProps.spawnRate === 0) {
+                // Calculate random height for the top pipe
+                const minHeight = 40;
+                const availableSpace = canvasHeight - pipeProps.gap - 20 - (minHeight * 2); // Space excluding ground, gap, and min top/bottom space
+                const topPipeHeight = Math.random() * availableSpace + minHeight;
+                const bottomPipeY = topPipeHeight + pipeProps.gap;
+                const bottomPipeHeight = canvasHeight - bottomPipeY - 20; // Height relative to ground
+
+                // Add top pipe
+                pipes.push({
+                    x: canvasWidth,
+                    y: 0,
+                    height: topPipeHeight,
+                    scored: false
+                });
+                // Add bottom pipe
+                pipes.push({
+                    x: canvasWidth,
+                    y: bottomPipeY,
+                    height: bottomPipeHeight,
+                    scored: true // Only top pipe counts for score directly
+                });
+            }
+
+            // Pipe Movement and Collision/Scoring
+            for (let i = pipes.length - 1; i >= 0; i--) {
+                pipes[i].x -= gameSpeed; // Move pipe left
+
+                // Collision detection with this pipe
+                if (
+                    bird.x < pipes[i].x + pipeProps.width &&    // Bird's right edge past pipe's left edge
+                    bird.x + bird.width > pipes[i].x &&         // Bird's left edge before pipe's right edge
+                    bird.y < pipes[i].y + pipes[i].height &&    // Bird's top edge above pipe's bottom edge
+                    bird.y + bird.height > pipes[i].y           // Bird's bottom edge below pipe's top edge
+                ) {
+                    endGame();
+                    return; // Stop update processing
+                }
+
+                // Score Check: Award point when bird clears a pipe pair
+                // Check the top pipe (y=0) and if it hasn't been scored yet
+                if (pipes[i].y === 0 && !pipes[i].scored && pipes[i].x + pipeProps.width < bird.x) {
+                    score++;
+                    pipes[i].scored = true; // Mark this top pipe as scored
+                    // Find and mark its corresponding bottom pipe too (optional but good practice)
+                     if (pipes[i+1]) pipes[i+1].scored = true;
+                    scoreDisplay.textContent = `Score: ${score}`;
+
+                    // Optional: Increase speed slightly every few points
+                     if (score > 0 && score % 5 === 0) {
+                         // gameSpeed += 0.1; // Uncomment to increase difficulty
+                     }
+                }
+
+                // Remove pipes that have moved off-screen
+                if (pipes[i].x + pipeProps.width < 0) {
+                    pipes.splice(i, 1); // Remove pipe from array
+                }
+            }
+        }
+
+        // --- Main Game Loop ---
+        function gameLoop() {
+            if (gameOver) { // Double check to stop the loop if game ended
+                 if (gameLoopId) cancelAnimationFrame(gameLoopId);
+                 gameLoopId = null;
+                 return;
+            }
+
+            update(); // Calculate new positions, check collisions, etc.
+            drawGameElements();   // Draw the updated scene
+
+            // Request the next frame
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Game State Management ---
+         function showGameOver(reason = "Game Over!") {
+             gameOver = true;
+             gameStarted = false;
+             finalScoreText.textContent = `Your Score: ${score}`;
+             document.getElementById('gameOverText').textContent = reason;
+             messageBox.style.display = 'flex'; // Use flex to show and center
+
+             // Explicitly stop the game loop
+             if (gameLoopId) {
+                cancelAnimationFrame(gameLoopId);
+                gameLoopId = null;
+             }
+         }
+
+        function endGame() {
+            // Ensure endGame actions only happen once per game over
+            if (!gameOver) {
+                 showGameOver();
+            }
+        }
+
+        function resetGame() {
+            // Re-initialize all variables and UI for a fresh start
+            initGame();
+        }
+
+        // --- Event Listeners Setup ---
+        function setupEventListeners() {
+            // Start the game
+            startButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent triggering window click listener
+                startGame();
+            });
+
+            // Flap the bird (Mouse Click)
+            window.addEventListener('click', flap);
+
+            // Flap the bird (Touch)
+            window.addEventListener('touchstart', flap, { passive: true }); // Use passive for performance
+
+            // Flap the bird (Keyboard Spacebar)
+            window.addEventListener('keydown', (e) => {
+                 if (e.code === 'Space' || e.key === ' ') {
+                     e.preventDefault(); // Prevent space bar from scrolling page
+                     flap();
+                 }
+            });
+
+            // Restart the game
+            restartButton.addEventListener('click', (e) => {
+                 e.stopPropagation(); // Prevent click propagation
+                 resetGame();
+            });
+
+            // Handle window resize
+            window.addEventListener('resize', resizeCanvas);
+        }
+
+        // --- Canvas Resizing ---
+         function resizeCanvas() {
+            const aspectRatio = 4 / 3;
+            const maxWidth = window.innerWidth * 0.9;
+            const maxHeight = window.innerHeight * 0.8;
+
+            let newWidth = maxWidth;
+            let newHeight = newWidth / aspectRatio;
+
+            if (newHeight > maxHeight) {
+                newHeight = maxHeight;
+                newWidth = newHeight * aspectRatio;
+            }
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            canvasWidth = canvas.width;
+            canvasHeight = canvas.height;
+
+            // Determine game state and act accordingly
+            if (gameStarted) { // If game was running, reset and show message
+                resetGame();
+                showGameOver("Resized - Restarting");
+            } else if (gameOver) { // If game was already over, redraw static state and keep message
+                 drawInitialState();
+                 messageBox.style.display = 'flex'; // Ensure message box is visible
+            } else { // If game hasn't started, just re-initialize
+                 initGame();
+            }
+        }
+
+
+        // --- Initial Setup ---
+        window.onload = () => {
+            setupEventListeners(); // Add all event listeners
+            resizeCanvas();      // Set initial canvas size (this will also call initGame)
+        };
+
+    </script>
+</body>
+</html>
+
+  
+
